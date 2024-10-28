@@ -12,8 +12,10 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
+
 	"x-ui/config"
 	"x-ui/database"
 	"x-ui/logger"
@@ -21,12 +23,12 @@ import (
 	"x-ui/util/sys"
 	"x-ui/xray"
 
-	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/disk"
-	"github.com/shirou/gopsutil/v3/host"
-	"github.com/shirou/gopsutil/v3/load"
-	"github.com/shirou/gopsutil/v3/mem"
-	"github.com/shirou/gopsutil/v3/net"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/disk"
+	"github.com/shirou/gopsutil/v4/host"
+	"github.com/shirou/gopsutil/v4/load"
+	"github.com/shirou/gopsutil/v4/mem"
+	"github.com/shirou/gopsutil/v4/net"
 )
 
 type ProcessState string
@@ -41,6 +43,7 @@ type Status struct {
 	T           time.Time `json:"-"`
 	Cpu         float64   `json:"cpu"`
 	CpuCores    int       `json:"cpuCores"`
+	LogicalPro  int       `json:"logicalPro"`
 	CpuSpeedMhz float64   `json:"cpuSpeedMhz"`
 	Mem         struct {
 		Current uint64 `json:"current"`
@@ -75,6 +78,11 @@ type Status struct {
 		IPv4 string `json:"ipv4"`
 		IPv6 string `json:"ipv6"`
 	} `json:"publicIP"`
+	AppStats struct {
+		Threads uint32 `json:"threads"`
+		Mem     uint64 `json:"mem"`
+		Uptime  uint64 `json:"uptime"`
+	} `json:"appStats"`
 }
 
 type Release struct {
@@ -86,31 +94,24 @@ type ServerService struct {
 	inboundService InboundService
 }
 
-const DebugMode = false // Set to true during development
-
 func getPublicIP(url string) string {
 	resp, err := http.Get(url)
 	if err != nil {
-		if DebugMode {
-			logger.Warning("get public IP failed:", err)
-		}
 		return "N/A"
 	}
 	defer resp.Body.Close()
 
 	ip, err := io.ReadAll(resp.Body)
 	if err != nil {
-		if DebugMode {
-			logger.Warning("read public IP failed:", err)
-		}
 		return "N/A"
 	}
 
-	if string(ip) == "" {
-		return "N/A" // default value
+	ipString := string(ip)
+	if ipString == "" {
+		return "N/A"
 	}
 
-	return string(ip)
+	return ipString
 }
 
 func (s *ServerService) GetStatus(lastStatus *Status) *Status {
@@ -129,6 +130,13 @@ func (s *ServerService) GetStatus(lastStatus *Status) *Status {
 	status.CpuCores, err = cpu.Counts(false)
 	if err != nil {
 		logger.Warning("get cpu cores count failed:", err)
+	}
+
+	status.LogicalPro = runtime.NumCPU()
+	if p != nil && p.IsRunning() {
+		status.AppStats.Uptime = p.GetUptime()
+	} else {
+		status.AppStats.Uptime = 0
 	}
 
 	cpuInfos, err := cpu.Info()
@@ -225,12 +233,22 @@ func (s *ServerService) GetStatus(lastStatus *Status) *Status {
 		status.Xray.ErrorMsg = s.xrayService.GetXrayResult()
 	}
 	status.Xray.Version = s.xrayService.GetXrayVersion()
+	var rtm runtime.MemStats
+	runtime.ReadMemStats(&rtm)
+
+	status.AppStats.Mem = rtm.Sys
+	status.AppStats.Threads = uint32(runtime.NumGoroutine())
+	if p != nil && p.IsRunning() {
+		status.AppStats.Uptime = p.GetUptime()
+	} else {
+		status.AppStats.Uptime = 0
+	}
 
 	return status
 }
 
 func (s *ServerService) GetXrayVersions() ([]string, error) {
-	url := "https://api.github.com/repos/MHSanaei/Xray-core/releases"
+	url := "https://api.github.com/repos/XTLS/Xray-core/releases"
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
@@ -249,15 +267,16 @@ func (s *ServerService) GetXrayVersions() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	versions := make([]string, 0, len(releases))
+	var versions []string
 	for _, release := range releases {
-		versions = append(versions, release.TagName)
+		if release.TagName >= "v1.7.5" {
+			versions = append(versions, release.TagName)
+		}
 	}
 	return versions, nil
 }
 
 func (s *ServerService) StopXrayService() (string error) {
-
 	err := s.xrayService.StopXray()
 	if err != nil {
 		logger.Error("stop xray failed:", err)
@@ -268,7 +287,6 @@ func (s *ServerService) StopXrayService() (string error) {
 }
 
 func (s *ServerService) RestartXrayService() (string error) {
-
 	s.xrayService.StopXray()
 	defer func() {
 		err := s.xrayService.RestartXray(true)
@@ -294,10 +312,20 @@ func (s *ServerService) downloadXRay(version string) (string, error) {
 		arch = "64"
 	case "arm64":
 		arch = "arm64-v8a"
+	case "armv7":
+		arch = "arm32-v7a"
+	case "armv6":
+		arch = "arm32-v6"
+	case "armv5":
+		arch = "arm32-v5"
+	case "386":
+		arch = "32"
+	case "s390x":
+		arch = "s390x"
 	}
 
 	fileName := fmt.Sprintf("Xray-%s-%s.zip", osName, arch)
-	url := fmt.Sprintf("https://github.com/MHSanaei/Xray-core/releases/download/%s/%s", version, fileName)
+	url := fmt.Sprintf("https://github.com/XTLS/Xray-core/releases/download/%s/%s", version, fileName)
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
@@ -370,62 +398,44 @@ func (s *ServerService) UpdateXray(version string) error {
 	if err != nil {
 		return err
 	}
-	err = copyZipFile("geosite.dat", xray.GetGeositePath())
-	if err != nil {
-		return err
-	}
-	err = copyZipFile("geoip.dat", xray.GetGeoipPath())
-	if err != nil {
-		return err
-	}
-	err = copyZipFile("iran.dat", xray.GetIranPath())
-	if err != nil {
-		return err
-	}
 
 	return nil
-
 }
 
-func (s *ServerService) GetLogs(count string) ([]string, error) {
-	// Define the journalctl command and its arguments
-	var cmdArgs []string
-	if runtime.GOOS == "linux" {
-		cmdArgs = []string{"journalctl", "-u", "x-ui", "--no-pager", "-n", count}
+func (s *ServerService) GetLogs(count string, level string, syslog string) []string {
+	c, _ := strconv.Atoi(count)
+	var lines []string
+
+	if syslog == "true" {
+		cmdArgs := []string{"journalctl", "-u", "x-ui", "--no-pager", "-n", count, "-p", level}
+		// Run the command
+		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		err := cmd.Run()
+		if err != nil {
+			return []string{"Failed to run journalctl command!"}
+		}
+		lines = strings.Split(out.String(), "\n")
 	} else {
-		return []string{"Unsupported operating system"}, nil
+		lines = logger.GetLogs(c, level)
 	}
 
-	// Run the command
-	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	err := cmd.Run()
-	if err != nil {
-		return nil, err
-	}
-
-	lines := strings.Split(out.String(), "\n")
-
-	return lines, nil
+	return lines
 }
 
 func (s *ServerService) GetConfigJson() (interface{}, error) {
-	// Open the file for reading
-	file, err := os.Open(xray.GetConfigPath())
+	config, err := s.xrayService.GetXrayConfig()
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-
-	// Read the file contents
-	fileContents, err := io.ReadAll(file)
+	contents, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 
 	var jsonData interface{}
-	err = json.Unmarshal(fileContents, &jsonData)
+	err = json.Unmarshal(contents, &jsonData)
 	if err != nil {
 		return nil, err
 	}
@@ -434,6 +444,11 @@ func (s *ServerService) GetConfigJson() (interface{}, error) {
 }
 
 func (s *ServerService) GetDb() ([]byte, error) {
+	// Update by manually trigger a checkpoint operation
+	err := database.Checkpoint()
+	if err != nil {
+		return nil, err
+	}
 	// Open the file for reading
 	file, err := os.Open(config.GetDBPath())
 	if err != nil {

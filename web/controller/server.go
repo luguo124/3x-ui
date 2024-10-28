@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"time"
+
 	"x-ui/web/global"
 	"x-ui/web/service"
 
@@ -104,7 +105,7 @@ func (a *ServerController) stopXrayService(c *gin.Context) {
 		jsonMsg(c, "", err)
 		return
 	}
-	jsonMsg(c, "Xray stoped", err)
+	jsonMsg(c, "Xray stopped", err)
 }
 
 func (a *ServerController) restartXrayService(c *gin.Context) {
@@ -118,11 +119,9 @@ func (a *ServerController) restartXrayService(c *gin.Context) {
 
 func (a *ServerController) getLogs(c *gin.Context) {
 	count := c.Param("count")
-	logs, err := a.serverService.GetLogs(count)
-	if err != nil {
-		jsonMsg(c, "getLogs", err)
-		return
-	}
+	level := c.PostForm("level")
+	syslog := c.PostForm("syslog")
+	logs := a.serverService.GetLogs(count, level, syslog)
 	jsonObj(c, logs, nil)
 }
 

@@ -1,8 +1,10 @@
 {
   "log": {
+    "access": "none",
+    "dnsLog": false,
+    "error": "",
     "loglevel": "warning",
-    "access": "./access.log",
-    "error": "./error.log"
+    "maskAddress": ""
   },
   "api": {
     "tag": "api",
@@ -25,8 +27,13 @@
   ],
   "outbounds": [
     {
+      "tag": "direct",
       "protocol": "freedom",
-      "settings": {}
+      "settings": {
+        "domainStrategy": "UseIP",
+        "redirect": "",
+        "noises": []
+      }
     },
     {
       "tag": "blocked",
@@ -43,11 +50,13 @@
     },
     "system": {
       "statsInboundDownlink": true,
-      "statsInboundUplink": true
+      "statsInboundUplink": true,
+      "statsOutboundDownlink": true,
+      "statsOutboundUplink": true
     }
   },
   "routing": {
-    "domainStrategy": "IPIfNonMatch",
+    "domainStrategy": "AsIs",
     "rules": [
       {
         "type": "field",

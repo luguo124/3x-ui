@@ -4,6 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"strings"
+
 	"x-ui/logger"
 
 	"github.com/gin-gonic/gin"
@@ -12,9 +13,11 @@ import (
 	"golang.org/x/text/language"
 )
 
-var i18nBundle *i18n.Bundle
-var LocalizerWeb *i18n.Localizer
-var LocalizerBot *i18n.Localizer
+var (
+	i18nBundle   *i18n.Bundle
+	LocalizerWeb *i18n.Localizer
+	LocalizerBot *i18n.Localizer
+)
 
 type I18nType string
 
@@ -29,7 +32,7 @@ type SettingService interface {
 
 func InitLocalizer(i18nFS embed.FS, settingService SettingService) error {
 	// set default bundle to english
-	i18nBundle = i18n.NewBundle(language.English)
+	i18nBundle = i18n.NewBundle(language.MustParse("en-US"))
 	i18nBundle.RegisterUnmarshalFunc("toml", toml.Unmarshal)
 
 	// parse files
@@ -79,7 +82,6 @@ func I18n(i18nType I18nType, key string, params ...string) string {
 		MessageID:    key,
 		TemplateData: templateData,
 	})
-
 	if err != nil {
 		logger.Errorf("Failed to localize message: %v", err)
 		return ""
@@ -135,7 +137,6 @@ func parseTranslationFiles(i18nFS embed.FS, i18nBundle *i18n.Bundle) error {
 			_, err = i18nBundle.ParseMessageFileBytes(data, path)
 			return err
 		})
-
 	if err != nil {
 		return err
 	}
